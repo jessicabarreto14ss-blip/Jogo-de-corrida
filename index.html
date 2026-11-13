@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Corrida Carioca: Tabuada na Pista</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&display=swap">
+<style>
+:root{--bg:#f3efe6;--fg:#14202e;--card:#fff;--ac:#e8453c;--ac2:#0a7d6e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1020;--fg:#eef3ff;--card:#161d36;--ac:#ff5a4f;--ac2:#33d6b9}}
+:root[data-theme="dark"]{--bg:#0b1020;--fg:#eef3ff;--card:#161d36;--ac:#ff5a4f;--ac2:#33d6b9}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,Segoe UI,Roboto,sans-serif;overflow:hidden}
+#c{position:fixed;inset:0;width:100%;height:100%}
+#hud{position:fixed;left:50%;bottom:calc(8px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:min(94vw,620px);aspect-ratio:8/5;max-height:56vh;touch-action:manipulation;display:none}
+#menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;text-align:center;background:linear-gradient(#0b1020cc,#0b1020f2);color:#eef3ff}
+h1{font-family:Bungee,Impact,sans-serif;font-size:clamp(28px,7vw,56px);margin:0;letter-spacing:1px;line-height:1.05}
+p{margin:0;max-width:34em;line-height:1.45}
+.lv{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;max-width:640px}
+button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:12px 18px;background:#1f2a4d;color:#eef3ff;font-weight:700;min-height:48px}
+button.lvb{border:2px solid #33d6b9;text-align:left}
+button.go{background:var(--ac);color:#fff}
+button:focus-visible{outline:3px solid #ffd84d;outline-offset:2px}
+#bk{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));right:8px;display:none;min-height:40px;padding:8px 12px;opacity:.85}
+small{opacity:.75}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="hud" width="800" height="500"></canvas>
+<button id="bk" aria-label="Voltar ao menu">Menu</button>
+<div id="menu">
+<h1>Corrida Carioca</h1>
+<p>Siga a rota apertando as setas, como no tapete de dança. Toque nos cubos brilhantes e acerte a tabuada para ganhar turbo por 3 segundos.</p>
+<div class="lv" id="lvs"></div>
+<button class="go" id="vr">Entrar no modo VR (Meta Quest)</button>
+<small id="info">Teclado: setas ou WASD. Respostas: ← ↑ → ou 1, 2, 3. No Quest: aponte e aperte o gatilho, ou use o direcional analógico.</small>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const T=THREE,V=(x,y,z)=>new T.Vector3(x,y,z);
+const LV=[
+{n:'Avenida Brasil',m:'FRLFRLF',L:50,sp:15,sky:0x9db4c6,gr:0x5d6b57,bar:0xcfd4d8,b:[0x8a8f94,0xa59b8d,0x77808a],t:[2,5]},
+{n:'Linha Vermelha',m:'RFLFRFLR',L:55,sp:17,sky:0xf2b38a,gr:0x6a5a4c,bar:0xd8332a,b:[0xe0a458,0x4fa3a5,0xc8553d,0xf2d16b],t:[2,7],pk:[[-1,-1,60,130,0x2f5d3a,1]]},
+{n:'Linha Amarela',m:'LRFLRFLRF',L:50,sp:19,sky:0x7fc4ee,gr:0x58704f,bar:0xf2c51d,b:[0x3a6ea5,0xb7c4cf,0x5b7083],t:[3,9],pk:[[1,-1,70,150,0x2f5d3a,1]]},
+{n:'Aterro do Flamengo',m:'FRBFLFRF',L:50,sp:20,sky:0x69b7f0,gr:0x3f8a4a,bar:0xffffff,b:[0xe9e2d0,0xd9b99b,0x9bb7d4],t:[3,10],pk:[[1,1,55,120,0x6d6a66,0],[-1,1,40,90,0x5f6f5c,1]],palm:1},
+{n:'Ponte Rio–Niterói',m:'FRFLFBFLF',L:50,sp:22,sky:0x8fd0f5,gr:0x1b6fa8,bar:0xf4f4f4,b:[0xdfe7ee],t:[4,12],pk:[[0,-1,80,110,0x4a6f55,0]],hump:16}];
+const DIR={F:'Frente',B:'Atrás',L:'Esquerda',R:'Direita'},COL={F:'#4cf08a',B:'#35d3ff',L:'#c86bff',R:'#ffb03b'};
+const ANG={F:0,R:Math.PI/2,B:Math.PI,L:-Math.PI/2};
+const KEY={ArrowUp:'F',w:'F',ArrowDown:'B',s:'B',ArrowLeft:'L',a:'L',ArrowRight:'R',d:'R'};
+const D4=[[0,-1],[1,0],[0,1],[-1,0]];
+const $=id=>document.getElementById(id);
+const cv=$('c'),hc=$('hud'),hx=hc.getContext('2d');
+const ren=new T.WebGLRenderer({canvas:cv,antialias:true});ren.xr.enabled=true;
+const sc=new T.Scene(),cam=new T.PerspectiveCamera(70,1,.1,1200);sc.add(cam);
+const dolly=new T.Group();sc.add(dolly);
+sc.add(new T.HemisphereLight(0xffffff,0x445566,.85));
+const sun=new T.DirectionalLight(0xfff2d0,.8);sun.position.set(60,120,40);sc.add(sun);
+let world=new T.Group();sc.add(world);
+// carro
+const car=new T.Group();car.rotation.order='YXZ';
+{const bm=(w,h,d,c,x,y,z)=>{const m=new T.Mesh(new T.BoxGeometry(w,h,d),new T.MeshStandardMaterial({color:c}));m.position.set(x,y,z);car.add(m);return m};
+bm(2.2,.7,4.4,0xe8453c,0,.65,0);bm(1.8,.6,2,0x20303f,0,1.25,.3);
+[[-1.1,-1.4],[1.1,-1.4],[-1.1,1.4],[1.1,1.4]].forEach(p=>bm(.4,.7,.8,0x111111,p[0],.35,p[1]));
+bm(1.6,.15,.1,0xffe27a,0,.7,-2.2)}
+sc.add(car);
+// painel VR
+const panel=new T.Mesh(new T.PlaneGeometry(1.6,1),new T.MeshBasicMaterial({map:new T.CanvasTexture(hc),transparent:true}));
+panel.position.set(0,1.0,-1.5);panel.rotation.x=-.3;panel.visible=false;dolly.add(panel);
+const ctrls=[0,1].map(i=>{const c=ren.xr.getController(i);c.add(new T.Line(new T.BufferGeometry().setFromPoints([V(0,0,0),V(0,0,-3)]),new T.LineBasicMaterial({color:0xffd84d})));
+c.addEventListener('selectstart',()=>vrClick(c));dolly.add(c);return c});
+// estado
+let G={st:'menu',lv:0},pts=[],nodeS=[],objs=[],mv=[],auth=[],lit={},msg='',msgT=0,q=null,pc=null;
+let rs=1;const rnd=()=>(rs=(rs*16807)%2147483647)/2147483647;
+const actx=window.AudioContext?new AudioContext():null;
+function beep(f,d=.12,t='square'){if(!actx)return;try{const o=actx.createOscillator(),g=actx.createGain();o.type=t;o.frequency.value=f;g.gain.value=.06;o.connect(g);g.connect(actx.destination);o.start();g.gain.exponentialRampToValueAtTime(1e-4,actx.currentTime+d);o.stop(actx.currentTime+d)}catch(e){}}
+function roadTex(){const c=document.createElement('canvas');c.width=128;c.height=128;const x=c.getContext('2d');x.fillStyle='#2b2f36';x.fillRect(0,0,128,128);x.fillStyle='#fff';x.fillRect(4,0,4,128);x.fillRect(120,0,4,128);
+for(const u of[43,85])x.fillRect(u-2,0,4,64);x.fillStyle='#ffd84d';const t=new T.CanvasTexture(c);t.wrapS=t.wrapT=T.RepeatWrapping;return t}
+function strip(off,y0,y1,mat,W){const pos=[],idx=[];for(let i=0;i<pts.length;i++){const p=pts[i],a=pts[Math.max(0,i-1)],b=pts[Math.min(pts.length-1,i+1)];const t=b.clone().sub(a);t.y=0;t.normalize();const s=V(t.z,0,-t.x);const q=p.clone().addScaledVector(s,off*W/2);pos.push(q.x,q.y+y0,q.z,q.x,q.y+y1,q.z);if(i)idx.push(2*i-2,2*i-1,2*i,2*i-1,2*i+1,2*i)}
+const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();return new T.Mesh(g,mat)}
+function road(W){const pos=[],uv=[],idx=[];for(let i=0;i<pts.length;i++){const p=pts[i],a=pts[Math.max(0,i-1)],b=pts[Math.min(pts.length-1,i+1)];const t=b.clone().sub(a);t.y=0;t.normalize();const s=V(t.z,0,-t.x);const l=p.clone().addScaledVector(s,W/2),r=p.clone().addScaledVector(s,-W/2);pos.push(l.x,l.y,l.z,r.x,r.y,r.z);uv.push(0,i/8,1,i/8);if(i)idx.push(2*i-2,2*i-1,2*i,2*i-1,2*i+1,2*i)}
+const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(pos,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(idx);g.computeVertexNormals();return new T.Mesh(g,new T.MeshStandardMaterial({map:roadTex(),side:T.DoubleSide}))}
+function build(i){
+const lv=LV[i];rs=7+i*13;sc.remove(world);world=new T.Group();sc.add(world);
+sc.background=new T.Color(lv.sky);sc.fog=new T.Fog(lv.sky,120,520);
+let h=0,cur=V(0,0,0),ctrl=[cur.clone()],last=0;mv=lv.m.split('');const nodes=[];
+const dv=k=>V(D4[k%4][0],0,D4[k%4][1]);
+for(let k=0;k<=mv.length;k++){const end=cur.clone().addScaledVector(dv(h),lv.L);if(k==mv.length){ctrl.push(end);break}
+const m=mv[k],hi=h;
+if(m=='F'){ctrl.push(end);nodes.push(end.clone());cur=end}
+else if(m=='B'){const sd=dv(last<0?hi+1:hi+3),c1=end.clone().addScaledVector(dv(hi),12),c2=c1.clone().addScaledVector(sd,20);ctrl.push(end.clone().addScaledVector(dv(hi),-6),c1,c2);nodes.push(c1.clone().add(c2).multiplyScalar(.5));h=(hi+2)%4;ctrl.push(c2.clone().addScaledVector(dv(h),10));cur=c2}
+else{h=(h+(m=='R'?1:3))%4;ctrl.push(end.clone().addScaledVector(dv(hi),-12),end.clone().addScaledVector(dv(h),12));nodes.push(end.clone());cur=end;last=m=='R'?1:-1}}
+if(lv.hump)ctrl.forEach((p,k)=>p.y=lv.hump*Math.pow(Math.sin(Math.PI*k/(ctrl.length-1)),2));
+const cu=new T.CatmullRomCurve3(ctrl,false,'centripetal');pts=cu.getSpacedPoints(Math.ceil(cu.getLength()));
+nodeS=[];let from=0;for(const n of nodes){let bi=from,bd=1e9;for(let k=from;k<pts.length;k++){const d=(pts[k].x-n.x)**2+(pts[k].z-n.z)**2;if(d<bd){bd=d;bi=k}}nodeS.push(bi);from=bi+10}
+const W=12;world.add(road(W));
+const bm=new T.MeshStandardMaterial({color:lv.bar,side:T.DoubleSide});world.add(strip(1,0,1.1,bm,W),strip(-1,0,1.1,bm,W));
+const gp=new T.Mesh(new T.PlaneGeometry(3000,3000),new T.MeshStandardMaterial({color:lv.gr}));gp.rotation.x=-Math.PI/2;gp.position.y=-.3;world.add(gp);
+// cenário
+const bg=new T.BoxGeometry(1,1,1);
+for(let k=0;k<110;k++){const p=pts[Math.floor(rnd()*pts.length)],sd=rnd()<.5?1:-1,o=18+rnd()*50,hh=lv.palm?3+rnd()*5:6+rnd()*(18+i*8);
+const q=new T.Mesh(bg,new T.MeshStandardMaterial({color:lv.b[Math.floor(rnd()*lv.b.length)]}));
+if(lv.hump&&k%2){continue}
+if(lv.palm&&k%2){q.geometry=new T.CylinderGeometry(.3,.4,hh,6);q.material=new T.MeshStandardMaterial({color:0x6b4a2b});const cr=new T.Mesh(new T.SphereGeometry(2.2,8,6),new T.MeshStandardMaterial({color:0x2e8b3d}));cr.position.y=hh/2;q.add(cr);q.position.set(p.x+sd*(10+rnd()*8),hh/2,p.z+rnd()*4)}
+else{q.scale.set(6+rnd()*8,hh,6+rnd()*8);q.position.set(p.x+sd*o,hh/2,p.z+(rnd()-.5)*10)}
+let ok=true;for(let j=0;j<pts.length;j+=6)if((pts[j].x-q.position.x)**2+(pts[j].z-q.position.z)**2<150){ok=false;break}
+if(ok)world.add(q)}
+let cx=0,cz=0;pts.forEach(p=>{cx+=p.x;cz+=p.z});cx/=pts.length;cz/=pts.length;
+(lv.pk||[]).forEach(a=>{const m=new T.Mesh(new T.ConeGeometry(a[2],a[3],20),new T.MeshStandardMaterial({color:a[4]}));m.position.set(cx+a[0]*260,a[3]/2-5,cz+a[1]*260);world.add(m);
+if(a[5]){const w=new T.MeshStandardMaterial({color:0xffffff});const v=new T.Mesh(bg,w),hz=new T.Mesh(bg,w);v.scale.set(2,14,2);hz.scale.set(12,2,2);v.position.set(m.position.x,a[3]+2,m.position.z);hz.position.set(m.position.x,a[3]+7,m.position.z);world.add(v,hz)}});
+// pórticos de decisão e cubos de tabuada
+nodeS.forEach((s,k)=>{const p=pts[s],c=new T.Mesh(new T.BoxGeometry(W+3,.8,.8),new T.MeshStandardMaterial({color:0xffffff,emissive:0x33d6b9,emissiveIntensity:.6}));c.position.set(p.x,p.y+7,p.z);const a=pts[Math.min(pts.length-1,s+1)].clone().sub(pts[s-1]);c.rotation.y=Math.atan2(-a.z,a.x)*1+0;c.rotation.y=Math.atan2(a.x,a.z)+Math.PI/2;world.add(c)});
+objs=[];[Math.floor(mv.length/3),Math.floor(2*mv.length/3)].forEach(k=>{const s=Math.floor((nodeS[k]+nodeS[k+1])/2),p=pts[s];const o=new T.Mesh(new T.BoxGeometry(2.2,2.2,2.2),new T.MeshStandardMaterial({color:0xffd84d,emissive:0xff9d00,emissiveIntensity:.9}));o.position.set(p.x,p.y+1.8,p.z);o.userData={s,on:true};world.add(o);objs.push(o)})}
+function startLevel(i){G.lv=i;build(i);Object.assign(G,{st:'play',s:0,v:0,pi:0,ai:0,t0:performance.now(),sc:0,err:0,ok:0,boost:0,tm:0});
+auth=mv.map(()=>false);$('menu').style.display='none';$('bk').style.display='block';hc.style.display=ren.xr.isPresenting?'none':'block';
+say('Siga a rota: aperte a seta pedida!',3)}
+function say(m,t=1.6){msg=m;msgT=t}
+function press(m){if(G.st!='play')return;lit[m]=.25;if(G.ai>G.pi+1||G.ai>=mv.length)return;
+if(m==mv[G.ai]){auth[G.ai]=true;G.ai++;G.sc+=100;G.ok++;say(['Perfeito!','Isso aí!','Boa curva!'][G.ai%3],1);beep(660)}
+else{G.err++;G.sc=Math.max(0,G.sc-20);say('Errou! Agora é '+DIR[mv[G.ai]]+'.',1.4);beep(160,.2,'sawtooth')}}
+function quiz(o){G.st='quiz';o.userData.on=false;o.visible=false;const t=LV[G.lv].t,a=t[0]+Math.floor(Math.random()*(t[1]-t[0]+1)),b=2+Math.floor(Math.random()*(t[1]-1)),r=a*b,ops=new Set([r]);
+while(ops.size<3){const d=[a,b,1,2,3,10][Math.floor(Math.random()*6)]*(Math.random()<.5?-1:1);const w=r+d;if(w>0)ops.add(w)}
+q={a,b,r,o:[...ops].sort(()=>Math.random()-.5),res:null}}
+function answer(i){if(G.st!='quiz'||q.res!==null)return;if(q.o[i]==q.r){q.res=1;G.boost=3;G.sc+=150;beep(880,.25);beep(1175,.3)}else{q.res=0;beep(150,.3,'sawtooth')}
+setTimeout(()=>{G.st='play';say(q.res?'TURBO por 3 segundos!':'Era '+q.a+' × '+q.b+' = '+q.r,2);q=null},1400)}
+// HUD
+const REG=[];
+function arrow(x,y,s,m,col,glow){hx.save();hx.translate(x,y);hx.rotate(ANG[m]);if(glow){hx.shadowColor=col;hx.shadowBlur=30}
+hx.fillStyle=glow?col:'#232b4a';hx.strokeStyle=col;hx.lineWidth=5;hx.beginPath();hx.moveTo(0,-s);hx.lineTo(s*.9,0);hx.lineTo(s*.38,0);hx.lineTo(s*.38,s*.8);hx.lineTo(-s*.38,s*.8);hx.lineTo(-s*.38,0);hx.lineTo(-s*.9,0);hx.closePath();hx.fill();hx.stroke();hx.restore()}
+function rr(x,y,w,h,r){hx.beginPath();hx.roundRect?hx.roundRect(x,y,w,h,r):hx.rect(x,y,w,h)}
+function drawHUD(now){const W=800,H=500;REG.length=0;hx.clearRect(0,0,W,H);hx.fillStyle='rgba(8,12,28,.88)';rr(0,0,W,H,28);hx.fill();hx.textAlign='center';hx.fillStyle='#eef3ff';
+if(G.st=='menu'){hx.font='bold 34px sans-serif';hx.fillText('Escolha a fase no menu',W/2,H/2);return}
+hx.font='bold 26px sans-serif';hx.textAlign='left';hx.fillText((G.lv+1)+'. '+LV[G.lv].n,24,40);hx.textAlign='right';hx.fillStyle='#ffd84d';hx.fillText(G.sc+' pts   '+Math.round(G.v*3.6)+' km/h'+(G.boost>0?'  TURBO':''),W-24,40);
+if(G.st=='done'){hx.textAlign='center';hx.fillStyle='#4cf08a';hx.font='bold 48px sans-serif';hx.fillText('Fase concluída!',W/2,150);hx.fillStyle='#eef3ff';hx.font='28px sans-serif';hx.fillText(G.sc+' pontos · '+G.ok+' acertos nas setas · '+G.err+' erros',W/2,205);hx.fillText('Tempo: '+G.tm.toFixed(0)+' s · Tabuada: '+G.qa+'/2',W/2,245);
+const lab=G.lv<4?'Próxima fase':'Jogar de novo';hx.fillStyle='#e8453c';rr(240,300,320,90,22);hx.fill();hx.fillStyle='#fff';hx.font='bold 34px sans-serif';hx.fillText(lab,W/2,358);REG.push({x:240,y:300,w:320,h:90,f:()=>startLevel(G.lv<4?G.lv+1:0)});return}
+// rota
+const n=mv.length,sw=Math.min(58,(W-60)/n);for(let k=0;k<n;k++){const x=W/2-(n-1)*sw/2+k*sw,done=k<G.ai;hx.globalAlpha=done?.35:1;arrow(x,82,sw*.36,mv[k],COL[mv[k]],k==G.ai);hx.globalAlpha=1}
+// tapete
+const cx=W/2,cy=300,u=104,pads=[['F',cx,cy-u],['L',cx-u,cy],['R',cx+u,cy],['B',cx,cy+u]];
+for(const[m,x,y]of pads){const on=lit[m]>0,tgt=G.st=='play'&&m==mv[G.ai]&&G.ai<mv.length;hx.fillStyle=on?COL[m]:'#141a33';hx.strokeStyle=COL[m];hx.lineWidth=on?6:3;hx.shadowColor=COL[m];hx.shadowBlur=on?40:tgt?18+10*Math.sin(now/120):0;rr(x-48,y-48,96,96,14);hx.fill();hx.stroke();hx.shadowBlur=0;arrow(x,y,34,m,on?'#fff':COL[m],on||(tgt&&Math.sin(now/120)>0));REG.push({x:x-48,y:y-48,w:96,h:96,f:()=>press(m)})}
+hx.textAlign='center';hx.font='bold 28px sans-serif';hx.fillStyle='#eef3ff';if(msgT>0)hx.fillText(msg,W/2,462);
+if(G.st=='quiz'){hx.fillStyle='rgba(8,12,28,.97)';rr(20,60,W-40,H-80,24);hx.fill();hx.fillStyle='#ffd84d';hx.font='bold 70px sans-serif';hx.fillText(q.a+' × '+q.b+' = ?',W/2,160);
+q.o.forEach((v,i)=>{const x=60+i*240,bc=q.res===null?'#1f2a4d':v==q.r?'#1f9d55':'#2a2f45';hx.fillStyle=bc;rr(x,215,200,140,20);hx.fill();hx.fillStyle='#fff';hx.font='bold 60px sans-serif';hx.fillText(v,x+100,305);hx.font='24px sans-serif';hx.fillText(['←','↑','→'][i]+'  ('+(i+1)+')',x+100,340);REG.push({x,y:215,w:200,h:140,f:()=>answer(i)})});
+hx.font='26px sans-serif';hx.fillStyle='#eef3ff';hx.fillText(q.res===null?'Escolha a resposta certa para ganhar turbo!':q.res?'Certo! Turbo ativado!':'Era '+q.r+'. Continue tentando!',W/2,420)}}
+function hudHit(px,py){for(const r of REG)if(px>=r.x&&px<=r.x+r.w&&py>=r.y&&py<=r.y+r.h){r.f();return}}
+hc.addEventListener('pointerdown',e=>{const b=hc.getBoundingClientRect();hudHit((e.clientX-b.left)*800/b.width,(e.clientY-b.top)*500/b.height)});
+const rc=new T.Raycaster();
+function vrClick(c){const m=new T.Matrix4().extractRotation(c.matrixWorld);rc.ray.origin.setFromMatrixPosition(c.matrixWorld);rc.ray.direction.set(0,0,-1).applyMatrix4(m);const h=rc.intersectObject(panel)[0];if(h)hudHit(h.uv.x*800,(1-h.uv.y)*500)}
+addEventListener('keydown',e=>{const k=e.key.length==1?e.key.toLowerCase():e.key;if(G.st=='play'&&KEY[k]){press(KEY[k]);e.preventDefault()}
+else if(G.st=='quiz'){const i={ArrowLeft:0,ArrowUp:1,ArrowRight:2,1:0,2:1,3:2}[k];if(i!==undefined)answer(i)}
+else if(G.st=='done'&&(k=='Enter'||k==' '))hudHit(400,340)});
+// menu e VR
+LV.forEach((l,i)=>{const b=document.createElement('button');b.className='lvb';b.textContent=(i+1)+'. '+l.n;b.onclick=()=>startLevel(i);$('lvs').appendChild(b)});
+$('bk').onclick=()=>{G.st='menu';$('menu').style.display='flex';$('bk').style.display='none';hc.style.display='none'};
+$('vr').onclick=async()=>{try{const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor']});ren.xr.setReferenceSpaceType('local-floor');await ren.xr.setSession(s);
+s.addEventListener('end',()=>{panel.visible=false;car.visible=true;dolly.remove(cam);sc.add(cam);hc.style.display=G.st=='menu'?'none':'block'});
+dolly.add(cam);cam.position.set(0,0,0);panel.visible=true;car.visible=false;hc.style.display='none';if(G.st=='menu')startLevel(G.lv)}catch(e){$('info').textContent='VR indisponível aqui. Abra o link direto no navegador do Meta Quest (não dentro de outra página).'}};
+if(!navigator.xr)$('vr').textContent='Modo VR: abra este link no Meta Quest';
+let stk=[0,0];
+function pads(){const s=ren.xr.getSession&&ren.xr.getSession();if(!s)return;for(const src of s.inputSources){const g=src.gamepad;if(!g||g.axes.length<4)continue;const x=g.axes[2],y=g.axes[3],a=Math.max(Math.abs(x),Math.abs(y));
+if(a<.35)stk[src.handedness=='left'?0:1]=0;else if(a>.75&&!stk[src.handedness=='left'?0:1]){stk[src.handedness=='left'?0:1]=1;const m=Math.abs(x)>Math.abs(y)?(x>0?'R':'L'):(y>0?'B':'F');if(G.st=='play')press(m);else if(G.st=='quiz')answer({L:0,F:1,R:2}[m]??-1)}}}
+// loop
+let tl=performance.now();
+function rsz(){ren.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}addEventListener('resize',rsz);rsz();
+ren.setAnimationLoop(()=>{const now=performance.now(),dt=Math.min(.05,(now-tl)/1e3);tl=now;
+for(const k in lit)lit[k]=Math.max(0,lit[k]-dt);msgT-=dt;pads();
+if(G.st=='play'||G.st=='quiz'||G.st=='done'){
+if(G.st=='play'){G.tm=(now-G.t0)/1e3;const lv=LV[G.lv];let tg=lv.sp*(G.boost>0?1.8:1);G.boost-=dt;
+if(G.pi<mv.length&&!auth[G.pi])tg=Math.min(tg,Math.max(0,nodeS[G.pi]-G.s-4)*1.5);
+G.v+=Math.max(-40*dt,Math.min(14*dt,tg-G.v));G.s=Math.min(pts.length-2,G.s+G.v*dt);
+if(G.pi<mv.length&&G.s>nodeS[G.pi]+2)G.pi++;
+objs.forEach(o=>{if(o.userData.on&&Math.abs(G.s-o.userData.s)<4)quiz(o)});
+if(G.s>=pts.length-3){G.st='done';G.qa=objs.filter(o=>!o.userData.on).length;G.qa=G.sc>0?G.qa:0;G.sc+=Math.max(0,300-Math.floor(G.tm))}}
+objs.forEach(o=>{o.rotation.y+=dt*2;o.rotation.x+=dt});
+const i=Math.floor(G.s),f=G.s-i,p=pts[i].clone().lerp(pts[i+1],f),t=pts[i+1].clone().sub(pts[i]).normalize();
+car.position.copy(p);car.rotation.y=Math.atan2(-t.x,-t.z);car.rotation.x=Math.atan2(t.y,Math.hypot(t.x,t.z));
+if(ren.xr.isPresenting){dolly.position.set(p.x,p.y-.2,p.z);dolly.rotation.y=car.rotation.y}
+else{const fw=V(t.x,0,t.z).normalize(),want=p.clone().addScaledVector(fw,-10).add(V(0,5.5,0));cam.position.lerp(want,Math.min(1,dt*4));cam.lookAt(p.clone().addScaledVector(fw,8).add(V(0,1,0)))}}
+else if(!ren.xr.isPresenting){const a=now/6000;cam.position.set(Math.sin(a)*60,25,Math.cos(a)*60);cam.lookAt(0,0,0)}
+if(ren.xr.isPresenting||hc.style.display!='none'){drawHUD(now);panel.material.map.needsUpdate=true}
+ren.render(sc,cam)});
+build(0);car.position.set(0,0,0);
+</script>
+</body>
+</html>
